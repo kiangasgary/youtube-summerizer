@@ -25,17 +25,34 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
     handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('bot.log')
+        logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger(__name__)
 
 # Load environment variables with error handling
 try:
-    load_dotenv()
-    TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-    GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+    # Try to load from .env file if it exists, but don't require it
+    try:
+        load_dotenv()
+        logger.info("Loaded environment variables from .env file")
+    except Exception as e:
+        logger.info("No .env file found, using system environment variables")
+    
+    # Get environment variables directly
+    TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
+    GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+    
+    # Log the first few characters of each token for debugging
+    if TELEGRAM_BOT_TOKEN:
+        logger.info(f"TELEGRAM_BOT_TOKEN found (starts with: {TELEGRAM_BOT_TOKEN[:4]}...)")
+    else:
+        logger.error("TELEGRAM_BOT_TOKEN not found")
+        
+    if GEMINI_API_KEY:
+        logger.info(f"GEMINI_API_KEY found (starts with: {GEMINI_API_KEY[:4]}...)")
+    else:
+        logger.error("GEMINI_API_KEY not found")
     
     if not TELEGRAM_BOT_TOKEN or not GEMINI_API_KEY:
         raise ValueError("Missing required environment variables")
@@ -595,6 +612,107 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
             )
     except Exception as e:
         logger.error(f"Failed to send error message: {str(e)}")
+
+async def handle_youtube_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle YouTube URL messages."""
+    try:
+        # Send initial processing message
+        processing_message = await update.message.reply_text(
+            "<b>🔄 Processing your request...</b>\n"
+            "This might take a few moments depending on the video length.",
+            parse_mode='HTML'
+        )
+        
+        # Extract video ID
+        video_id = extract_video_id(update.message.text)
+        if not video_id:
+            await processing_message.edit_text(
+                "❌ <b>Please send a valid YouTube URL</b>\n"
+                "Use /format to see supported URL formats",
+                parse_mode='HTML'
+            )
+            return
+        
+        # Get transcript
+        try:
+            logger.info("Fetching transcript for video ID: %s", video_id)
+            transcript = get_transcript(video_id)
+            logger.info("Transcript fetched successfully")
+        except Exception as e:
+            error_msg = str(e)
+            logger.error("Transcript error: %s", error_msg)
+            
+            if "No transcripts available" in error_msg:
+                error_text = (
+                    "❌ <b>This video has no English captions available.</b>\n\n"
+                    "Please try a video that has English captions enabled."
+                )
+            elif "not available" in error_msg.lower():
+                error_text = (
+                    "❌ <b>The English captions for this video are not accessible.</b>\n\n"
+                    "This could be because:\n"
+                    "&#8226; The video owner has disabled captions\n"
+                    "&#8226; The captions are still processing\n"
+                    "&#8226; The video has been deleted or is private\n\n"
+                    "Please try another video with English captions."
+                )
+            else:
+                error_text = (
+                    "❌ <b>Unable to fetch English transcript.</b>\n\n"
+                    "This could be because:\n"
+                    "&#8226; The video has no English captions\n"
+                    "&#8226; The captions are auto-generated and not publicly accessible\n"
+                    "&#8226; The video owner has disabled captions\n\n"
+                    "Try a different video with English subtitles enabled."
+                )
+            
+            await processing_message.edit_text(error_text, parse_mode='HTML')
+            return
+        
+        # Generate summary
+        try:
+            logger.info("Generating summary...")
+            summary = await generate_summary(transcript, True)
+            logger.info("Summary generated successfully")
+            
+            # Sanitize and format the summary
+            safe_summary = sanitize_html(summary)
+            
+            # Split the message if it's too long
+            message_parts = split_message(f"<b>🎥 Video Summary:</b>\n\n{safe_summary}")
+            
+            # Send the first part by editing the processing message
+            await processing_message.edit_text(
+                message_parts[0],
+                parse_mode='HTML',
+                disable_web_page_preview=True
+            )
+            
+            # Send any additional parts as new messages
+            for part in message_parts[1:]:
+                await update.message.reply_text(
+                    part,
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
+            
+        except Exception as e:
+            logger.error("Summary error: %s", str(e))
+            error_message = (
+                "❌ <b>Error generating summary.</b>\n"
+                f"Error details: {html.escape(str(e))}\n"
+                "Please try again later or contact support."
+            )
+            await processing_message.edit_text(error_message, parse_mode='HTML')
+            return
+        
+    except Exception as e:
+        logger.error("Error processing request: %s", str(e))
+        await update.message.reply_text(
+            "❌ <b>An error occurred while processing your request.</b>\n"
+            f"Error details: {html.escape(str(e))}",
+            parse_mode='HTML'
+        )
 
 def main():
     """Start the bot with enhanced error handling."""
