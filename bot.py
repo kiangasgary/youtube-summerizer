@@ -742,11 +742,7 @@ def main():
         application.run_polling(
             allowed_updates=Update.ALL_TYPES,
             drop_pending_updates=True,  # Don't process updates from when the bot was offline
-            timeout=30,  # Increase timeout
-            read_timeout=30,
-            write_timeout=30,
-            pool_timeout=30,
-            connect_timeout=30
+            pool_timeout=30
         )
         
     except Exception as e:
