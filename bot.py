@@ -2,6 +2,7 @@ import os
 import logging
 import re
 import html
+import sys
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler, ConversationHandler
@@ -19,22 +20,38 @@ except ImportError:
             return LangObj(part1)
     languages = LanguageFallback()
 
-# Load environment variables
-load_dotenv()
-
-# Configure logging
+# Enhanced logging configuration
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.INFO,
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('bot.log')
+    ]
 )
 logger = logging.getLogger(__name__)
 
-# Configure API keys
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+# Load environment variables with error handling
+try:
+    load_dotenv()
+    TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+    GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+    
+    if not TELEGRAM_BOT_TOKEN or not GEMINI_API_KEY:
+        raise ValueError("Missing required environment variables")
+    
+    logger.info("Environment variables loaded successfully")
+except Exception as e:
+    logger.error(f"Failed to load environment variables: {str(e)}")
+    raise
 
-# Configure model manager
-model_manager = GoogleAIModelManager(GEMINI_API_KEY)
+# Initialize model manager with error handling
+try:
+    model_manager = GoogleAIModelManager(GEMINI_API_KEY)
+    logger.info("Model manager initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize model manager: {str(e)}")
+    raise
 
 # Bot settings (can be customized per user in the future)
 SUMMARY_SETTINGS = {
@@ -565,26 +582,62 @@ async def summarize_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     user_states[update.effective_user.id] = WAITING_FOR_URL
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle errors in the telegram bot."""
+    logger.error(f"Update {update} caused error {context.error}")
+    
+    try:
+        if update and hasattr(update, 'effective_message'):
+            await update.effective_message.reply_text(
+                "❌ An error occurred while processing your request.\n"
+                "The error has been logged and we'll look into it.",
+                parse_mode='HTML'
+            )
+    except Exception as e:
+        logger.error(f"Failed to send error message: {str(e)}")
+
 def main():
-    """Start the bot."""
-    # Create application
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-
-    # Add handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("about", about_command))
-    application.add_handler(CommandHandler("format", format_command))
-    application.add_handler(CommandHandler("settings", settings_command))
-    application.add_handler(CommandHandler("summarize", summarize_command))
-    application.add_handler(CallbackQueryHandler(button_callback))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    # Setup commands menu
-    application.post_init = setup_commands
-
-    # Start the bot
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    """Start the bot with enhanced error handling."""
+    try:
+        # Create application
+        application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+        
+        # Add handlers
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("help", help_command))
+        application.add_handler(CommandHandler("about", about_command))
+        application.add_handler(CommandHandler("format", format_command))
+        application.add_handler(CommandHandler("settings", settings_command))
+        application.add_handler(CommandHandler("summarize", summarize_command))
+        application.add_handler(CallbackQueryHandler(button_callback))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+        
+        # Add error handler
+        application.add_error_handler(error_handler)
+        
+        # Setup commands menu
+        application.post_init = setup_commands
+        
+        logger.info("Bot is starting...")
+        
+        # Start the bot with error handling
+        application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,  # Don't process updates from when the bot was offline
+            timeout=30,  # Increase timeout
+            read_timeout=30,
+            write_timeout=30,
+            pool_timeout=30,
+            connect_timeout=30
+        )
+        
+    except Exception as e:
+        logger.error(f"Critical error starting bot: {str(e)}")
+        raise
 
 if __name__ == '__main__':
-    main() 
+    try:
+        main()
+    except Exception as e:
+        logger.error(f"Fatal error: {str(e)}")
+        sys.exit(1) 
