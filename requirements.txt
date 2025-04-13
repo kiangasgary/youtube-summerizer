@@ -1,0 +1,12 @@
+python-telegram-bot>=20.0
+youtube-transcript-api>=0.6.1
+google-generativeai>=0.3.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+iso639>=0.1.4
+typing-extensions>=4.5.0
+fastapi>=0.110.0
+uvicorn>=0.27.1
+sqlalchemy>=2.0.27
+pydantic>=2.6.3
+python-multipart>=0.0.9 
