@@ -741,8 +741,7 @@ def main():
         # Start the bot with error handling
         application.run_polling(
             allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True,  # Don't process updates from when the bot was offline
-            pool_timeout=30
+            drop_pending_updates=True  # Don't process updates from when the bot was offline
         )
         
     except Exception as e:
